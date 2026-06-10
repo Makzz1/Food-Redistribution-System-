@@ -1,0 +1,34 @@
+# Elasticsearch Implementation Plan: Nearby User Notifications
+
+Currently, when a donor creates a food post, the application fetches **all** verified receivers from the database and calculates the distance to each one sequentially (O(n) time complexity) to decide whether to send an email. 
+
+To utilize Elasticsearch's lightning-fast BKD tree (O(log n) time complexity) for this logic, we need to replicate what we did for `FoodPost`, but this time for the `User` entity. 
+
+Here is the step-by-step plan for what we are doing and exactly why we are doing it:
+
+### Step 1: Create `UserDocument.java`
+**What are we doing?** We will create a new class in the `document` folder called `UserDocument`, annotated with `@Document(indexName = "users")`. It will hold the user's ID, Email, Role, and a `GeoPoint` for their location.
+**Why are we doing it?** Just like MySQL needs a table definition, Elasticsearch needs a "Document" definition to know what data it is indexing. The `GeoPoint` field tells Elasticsearch to structure this data into a spatial BKD tree so it can be mapped geographically.
+
+### Step 2: Create `UserSearchRepository.java`
+**What are we doing?** We will create an interface extending `ElasticsearchRepository`. We'll add a method: `findByRoleAndLocationNear(String role, GeoPoint location, String distance)`.
+**Why are we doing it?** This repository gives us a way to talk to Elasticsearch. The specific method name tells Spring Data to automatically construct a spatial query that filters for a specific role (like `RECEIVER`) and finds users within the geometric radius.
+
+### Step 3: Update `AuthService` (Registration)
+**What are we doing?** In the `register()` method, after saving the new `User` to MySQL, we will create a `UserDocument` and save it to the `UserSearchRepository`.
+**Why are we doing it?** Elasticsearch is a secondary database. If we don't actively push our MySQL data into it, it will be completely empty. When a user registers (especially if they provide coordinates during registration), we must place them on the Elasticsearch "map" immediately.
+
+### Step 4: Update `UserService` (Profile Updates)
+**What are we doing?** In the `updateProfile()` method, after saving the updated user to MySQL, we will update their `UserDocument` in Elasticsearch.
+**Why are we doing it?** If a user moves to a new city and updates their profile coordinates, we need to update their pin on the Elasticsearch map. Otherwise, they will keep receiving notifications for their old city.
+
+### Step 5: Update `FoodPostService` (Email Notifications)
+**What are we doing?** In the `createFoodPost()` method, we will delete the block of code that loops through all receivers and manually calculates `GeoUtils.calculateDistanceKm`. Instead, we will call `userSearchRepository.findByRoleAndLocationNear("RECEIVER", new GeoPoint(lat, lon), "50km")`. We will then loop through that much smaller list and send the emails.
+**Why are we doing it?** This is the ultimate goal! By offloading the spatial filtering to Elasticsearch, the database prunes thousands of irrelevant users instantly, returning only the exact users inside the 50km radius. This prevents the Spring Boot application from choking on math calculations when your user base grows to tens of thousands.
+
+## User Review Required
+
+> [!IMPORTANT]
+> Because we are adding a brand new `users` index, any existing users currently residing in your MySQL database won't automatically receive emails, because they haven't been copied over to Elasticsearch yet. Only newly registered users or users who update their profile will be indexed. This is perfectly fine for testing and local development, but let me know if you want me to write a one-time script to sync them later. 
+
+Does this step-by-step logic make sense? If you approve, I will begin writing the code!
