@@ -1,5 +1,8 @@
 package com.foodredistribution.foodredistribution.controller;
 
+import com.foodredistribution.foodredistribution.annotation.RateLimit;
+
+
 import java.util.List;
 import java.util.Map;
 
@@ -42,7 +45,9 @@ public class FoodPostController {
 
     @PreAuthorize("hasRole('DONOR') or hasRole('ADMIN')")
     @PostMapping
+    @RateLimit(requests = 10, window = 60)
     public FoodPostResponseDTO createFoodPost(
+
             @Valid @RequestBody CreateFoodPostRequestDTO request,
             Authentication authentication
     ) {
@@ -59,6 +64,7 @@ public class FoodPostController {
 
     @PreAuthorize("hasRole('RECEIVER') or hasRole('ADMIN')")
     @PostMapping("/{foodPostId}/claim")
+    @RateLimit(requests = 10, window = 60)
     public String claimFood(
             @PathVariable Long foodPostId,
             @Valid @RequestBody ClaimFoodRequestDTO request,
@@ -88,6 +94,7 @@ public class FoodPostController {
 
     @PreAuthorize("hasRole('DONOR') or hasRole('ADMIN')")
     @PutMapping("/{id}")
+    @RateLimit(requests = 10, window = 60)
     public FoodPostResponseDTO updateFoodPost(
             @PathVariable Long id,
             @Valid @RequestBody UpdateFoodPostRequestDTO request,
@@ -98,6 +105,7 @@ public class FoodPostController {
 
     @PreAuthorize("hasRole('DONOR') or hasRole('ADMIN')")
     @DeleteMapping("/{id}")
+    @RateLimit(requests = 5, window = 60)
     public ResponseEntity<String> deleteFoodPost(
             @PathVariable Long id,
             Authentication authentication
@@ -110,6 +118,7 @@ public class FoodPostController {
 
     @PreAuthorize("hasRole('DONOR') or hasRole('ADMIN')")
     @PostMapping("/{foodId}/images")
+    @RateLimit(requests = 5, window = 60)
     public ResponseEntity<FoodPostImagesResponseDTO> uploadImages(
             @PathVariable Long foodId,
             @RequestParam("images") List<MultipartFile> images,
@@ -128,14 +137,15 @@ public class FoodPostController {
 
     @PreAuthorize("hasRole('RECEIVER') or hasRole('ADMIN')")
     @GetMapping("/available/nearby")
-    public ResponseEntity<List<NearbyFoodPostResponseDTO>> getNearbyFoodPosts(
-            @RequestParam(defaultValue = "50") double radius,
+    public ResponseEntity<Page<NearbyFoodPostResponseDTO>> getNearbyFoodPosts(
+            @RequestParam double latitude,
+            @RequestParam double longitude,
+            @RequestParam(name = "radiusKm", defaultValue = "50") double radiusKm,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            Authentication authentication
+            @RequestParam(defaultValue = "10") int size
     ) {
-        List<NearbyFoodPostResponseDTO> result = foodPostService.getNearbyFoodPosts(
-                authentication.getName(), radius, page, size
+        Page<NearbyFoodPostResponseDTO> result = foodPostService.getNearbyFoodPosts(
+                latitude, longitude, radiusKm, page, size
         );
         return ResponseEntity.ok(result);
     }

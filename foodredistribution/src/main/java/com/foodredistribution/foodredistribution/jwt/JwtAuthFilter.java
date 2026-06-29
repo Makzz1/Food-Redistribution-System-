@@ -14,6 +14,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import com.foodredistribution.foodredistribution.entity.User;
 import com.foodredistribution.foodredistribution.repository.UserRepository;
 
+import org.springframework.data.redis.core.StringRedisTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,6 +30,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     @Override
     protected void doFilterInternal(
@@ -53,7 +61,31 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        User user = userRepository.findByEmail(email).orElse(null);
+        User user = null;
+        String cacheKey = "jwt_user::" + email;
+        
+        try {
+            String cachedData = redisTemplate.opsForValue().get(cacheKey);
+            if (cachedData != null) {
+                user = objectMapper.readValue(cachedData, User.class);
+            }
+        } catch (Exception e) {
+            // Ignore cache errors, fallback to DB
+        }
+
+        if (user == null) {
+            user = userRepository.findByEmail(email).orElse(null);
+            
+            if (user != null) {
+                try {
+                    // Cache the user details for 5 minutes
+                    String json = objectMapper.writeValueAsString(user);
+                    redisTemplate.opsForValue().set(cacheKey, json, java.time.Duration.ofMinutes(5));
+                } catch (Exception e) {
+                    // Ignore cache write errors
+                }
+            }
+        }
 
         if (user == null) {
             // Token was valid but user no longer exists in DB

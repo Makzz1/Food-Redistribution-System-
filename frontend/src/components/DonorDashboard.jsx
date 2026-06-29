@@ -129,7 +129,11 @@ function HomeTab({ emailVerified }) {
       
       if (selectedImages.length > 0 && newPost.id) {
         try {
-          await api.uploadFoodImages(newPost.id, selectedImages);
+          const formData = new FormData();
+          selectedImages.forEach(file => {
+            formData.append('files', file);
+          });
+          await api.uploadFoodImages(newPost.id, formData);
         } catch (imgErr) {
           console.error("Image upload failed:", imgErr);
           showAlert("Post created, but some images failed to upload.", "warning");

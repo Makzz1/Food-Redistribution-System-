@@ -8,6 +8,8 @@ import RegisterPage from './components/RegisterPage'
 import ForgotPasswordPage from './components/ForgotPasswordPage'
 import ResetPasswordPage from './components/ResetPasswordPage'
 import DashboardPage from './components/DashboardPage'
+import OAuth2RedirectHandler from './components/OAuth2RedirectHandler'
+import CompleteProfilePage from './components/CompleteProfilePage'
 import { PopupProvider } from './context/PopupContext'
 
 gsap.registerPlugin(ScrollTrigger)
@@ -58,6 +60,8 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/oauth2/redirect" element={<OAuth2RedirectHandler />} />
+          <Route path="/complete-profile" element={<CompleteProfilePage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
         </Routes>
       </BrowserRouter>

@@ -1,5 +1,8 @@
 package com.foodredistribution.foodredistribution.controller;
 
+import com.foodredistribution.foodredistribution.annotation.RateLimit;
+
+
 import java.util.Map;
 
 import com.foodredistribution.foodredistribution.dto.ChangePasswordRequestDTO;
@@ -46,6 +49,7 @@ public class UserController {
     // ── Task 4: Update profile ─────────────────────────────────────────────
 
     @PutMapping("/profile")
+    @RateLimit(requests = 10, window = 60)
     public ResponseEntity<ProfileResponseDTO> updateProfile(
             @Valid @RequestBody UpdateProfileRequestDTO request,
             Authentication authentication
@@ -58,6 +62,7 @@ public class UserController {
     // ── Task 5: Change password ────────────────────────────────────────────
 
     @PutMapping("/change-password")
+    @RateLimit(requests = 5, window = 60)
     public ResponseEntity<Map<String, String>> changePassword(
             @Valid @RequestBody ChangePasswordRequestDTO request,
             Authentication authentication
@@ -70,6 +75,7 @@ public class UserController {
     // ── Task 2: Profile image upload ───────────────────────────────────────
 
     @PostMapping("/profile-image")
+    @RateLimit(requests = 5, window = 60)
     public ResponseEntity<ProfileImageResponseDTO> uploadProfileImage(
             @RequestParam("image") MultipartFile image,
             Authentication authentication

@@ -22,9 +22,6 @@ import com.foodredistribution.foodredistribution.entity.User;
 import com.foodredistribution.foodredistribution.jwt.JwtService;
 import com.foodredistribution.foodredistribution.repository.RefreshTokenRepository;
 import com.foodredistribution.foodredistribution.repository.UserRepository;
-import com.foodredistribution.foodredistribution.repository.UserSearchRepository;
-import com.foodredistribution.foodredistribution.document.UserDocument;
-import org.springframework.data.elasticsearch.core.geo.GeoPoint;
 
 @Service
 public class AuthService {
@@ -50,9 +47,6 @@ public class AuthService {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
-    @Autowired
-    private UserSearchRepository userSearchRepository;
-
     public RegisterResponseDTO register(RegisterRequestDTO dto) {
         
         String verificationToken =
@@ -76,17 +70,6 @@ public class AuthService {
         user.setVerificationToken(verificationToken);
 
         User savedUser = userRepository.save(user);
-
-        // Sync to Elasticsearch if location is provided
-        if (savedUser.getLatitude() != null && savedUser.getLongitude() != null) {
-            UserDocument userDoc = new UserDocument(
-                    String.valueOf(savedUser.getId()),
-                    savedUser.getEmail(),
-                    savedUser.getRole().name(),
-                    new GeoPoint(savedUser.getLatitude(), savedUser.getLongitude())
-            );
-            userSearchRepository.save(userDoc);
-        }
 
         emailService.sendVerificationEmail(
                 user.getEmail(),
@@ -113,7 +96,10 @@ public class AuthService {
             throw new RuntimeException("Your account has been banned. Please contact support.");
         }
 
-        String accessToken = jwtService.generateToken(dto.getEmail());
+        boolean profileComplete = (user.getRole() != null && user.getLatitude() != null && user.getLongitude() != null);
+        String roleStr = user.getRole() != null ? user.getRole().name() : null;
+
+        String accessToken = jwtService.generateToken(dto.getEmail(), roleStr, profileComplete);
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
 
         return new LoginResponseDTO(
@@ -141,8 +127,15 @@ public class AuthService {
         // Rotate: invalidate old, create new
         RefreshToken newRefreshToken = refreshTokenService.rotateToken(refreshToken);
 
+        boolean profileComplete = (newRefreshToken.getUser().getRole() != null 
+                && newRefreshToken.getUser().getLatitude() != null 
+                && newRefreshToken.getUser().getLongitude() != null);
+        String roleStr = newRefreshToken.getUser().getRole() != null ? newRefreshToken.getUser().getRole().name() : null;
+
         String accessToken = jwtService.generateToken(
-                newRefreshToken.getUser().getEmail()
+                newRefreshToken.getUser().getEmail(),
+                roleStr,
+                profileComplete
         );
 
         return new LoginResponseDTO(
@@ -205,5 +198,30 @@ public class AuthService {
         user.setPasswordResetTokenExpiry(null);
 
         userRepository.save(user);
+    }
+
+    @Transactional
+    public LoginResponseDTO completeProfile(String email, com.foodredistribution.foodredistribution.dto.CompleteProfileRequestDTO dto) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        user.setRole(dto.getRole());
+        user.setLatitude(dto.getLatitude());
+        user.setLongitude(dto.getLongitude());
+        user.setLocation(dto.getLocation());
+
+        userRepository.save(user);
+
+        // Generate a new token that now has profileComplete = true
+        String accessToken = jwtService.generateToken(user.getEmail(), user.getRole().name(), true);
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
+
+        return new LoginResponseDTO(
+                "Profile completed successfully",
+                user.getId(),
+                accessToken,
+                refreshToken.getToken(),
+                jwtExpirationMs / 1000
+        );
     }
 }

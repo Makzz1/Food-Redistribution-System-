@@ -1,2 +1,32 @@
-# Ignore environment variables containing secrets
+# Compiled Java class files
+*.class
+
+# Log files
+logs/
+*.log
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# Build output
+target/
+*.war
+*.jar
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.iml
+
+# Dependency directories
+node_modules/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Environment variables (contains secrets)
 .env
+*.env

@@ -19,6 +19,9 @@ public class SecurityConfig {
     @Autowired
     private JwtAuthFilter jwtAuthFilter;
 
+    @Autowired
+    private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+
     @Bean
     public BCryptPasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -60,6 +63,11 @@ public class SecurityConfig {
                         // Admin bypasses those via the @PreAuthorize expressions
                         // which include hasRole('ADMIN').
                         .anyRequest().authenticated()
+                )
+
+                // ── OAuth2 Login Configuration ───────────────────────────
+                .oauth2Login(oauth2 -> oauth2
+                        .successHandler(oAuth2LoginSuccessHandler)
                 )
 
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

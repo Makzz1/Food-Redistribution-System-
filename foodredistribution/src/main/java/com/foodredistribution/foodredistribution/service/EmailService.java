@@ -1,5 +1,6 @@
 package com.foodredistribution.foodredistribution.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Async;
@@ -15,6 +16,13 @@ public class EmailService {
 
     private final UserRepository userRepository;
 
+    // Dynamic URLs from config — change via env vars for production
+    @Value("${app.backend-url}")
+    private String backendUrl;
+
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
+
     public EmailService(
             JavaMailSender mailSender,
             UserRepository userRepository
@@ -24,14 +32,14 @@ public class EmailService {
         this.userRepository = userRepository;
     }
 
-    @Async
+    @Async("taskExecutor")
     public void sendVerificationEmail(
             String toEmail,
             String token
     ) {
 
         String verificationLink =
-                "http://localhost:8080/api/v1/auth/verify-email?token="
+                backendUrl + "/api/v1/auth/verify-email?token="
                         + token;
 
         SimpleMailMessage message =
@@ -67,7 +75,7 @@ public class EmailService {
         userRepository.save(user);
     }
 
-    @Async
+    @Async("taskExecutor")
     public void sendFoodNotificationEmail(
 
                 String toEmail,
@@ -104,15 +112,15 @@ public class EmailService {
         mailSender.send(message);
         }
 
-    @Async
+    @Async("taskExecutor")
     public void sendPasswordResetEmail(
             String toEmail,
             String token
     ) {
 
-        // Replace with your actual frontend URL
+        // Frontend URL from config — dynamic for production
         String resetLink =
-                "http://localhost:3000/reset-password?token=" + token;
+                frontendUrl + "/reset-password?token=" + token;
 
         SimpleMailMessage message = new SimpleMailMessage();
 
@@ -131,4 +139,4 @@ public class EmailService {
         mailSender.send(message);
     }
 
-}
+}

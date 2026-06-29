@@ -35,6 +35,12 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
+    @ExceptionHandler(RateLimitException.class)
+    public ResponseEntity<Map<String, Object>> handleRateLimitException(RateLimitException ex) {
+        return buildError(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+    }
+
+
     // ── Bean-validation failures (@Valid) → 400 ────────────────────────────
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

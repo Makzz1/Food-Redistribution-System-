@@ -29,8 +29,14 @@ public class JwtService {
     }
 
     public String generateToken(String email){
+        return generateToken(email, null, true);
+    }
+
+    public String generateToken(String email, String role, boolean profileComplete){
         return Jwts.builder()
                 .setSubject(email)
+                .claim("role", role)
+                .claim("profileComplete", profileComplete)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
                 .signWith(key, SignatureAlgorithm.HS256)

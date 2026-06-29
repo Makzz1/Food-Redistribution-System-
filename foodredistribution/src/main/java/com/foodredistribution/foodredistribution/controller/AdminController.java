@@ -75,13 +75,12 @@ public class AdminController {
         long totalUsers = userRepository.count();
         long totalPosts = foodPostRepository.count();
         long totalClaims = foodClaimRepository.count();
-        long activeDisputes = foodClaimRepository.findAll().stream()
-                .filter(c -> "DISPUTED".equals(c.getStatus().name()))
-                .count();
 
-        long successfulDonations = foodClaimRepository.findAll().stream()
-                .filter(c -> "COMPLETED".equals(c.getStatus().name()))
-                .count();
+        // Use count queries instead of loading all claims into memory
+        long activeDisputes = foodClaimRepository.countByStatus(
+                com.foodredistribution.foodredistribution.enums.ClaimStatus.DISPUTED);
+        long successfulDonations = foodClaimRepository.countByStatus(
+                com.foodredistribution.foodredistribution.enums.ClaimStatus.COMPLETED);
 
         return ResponseEntity.ok(Map.of(
                 "totalUsers", totalUsers,

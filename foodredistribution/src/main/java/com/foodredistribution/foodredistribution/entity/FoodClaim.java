@@ -15,9 +15,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Index;
 
 @Entity
-@Table(name = "food_claims")
+@Table(name = "food_claims" , indexes = {
+    @Index(name = "idx_foodclaim_receiver", columnList = "receiver_id")
+})
 public class FoodClaim {
 
     @Id
@@ -107,4 +110,4 @@ public class FoodClaim {
 
     public LocalDateTime getDisputedAt() { return disputedAt; }
     public void setDisputedAt(LocalDateTime disputedAt) { this.disputedAt = disputedAt; }
-}
+}

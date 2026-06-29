@@ -39,10 +39,27 @@ public interface FoodPostRepository extends JpaRepository<FoodPost, Long> {
 
     List<FoodPost>
     findByStatusAndExpiryTimeBefore(
-
             FoodStatus status,
-
             LocalDateTime time
+    );
+
+    @Query(value = """
+        SELECT * FROM food_posts f
+        WHERE f.status = 'AVAILABLE'
+        AND ( 6371 * acos( least(1.0, greatest(-1.0, cos( radians(cast(:lat as float8)) ) * cos( radians( cast(f.latitude as float8) ) ) * cos( radians( cast(f.longitude as float8) ) - radians(cast(:lon as float8)) ) + sin( radians(cast(:lat as float8)) ) * sin( radians( cast(f.latitude as float8) ) ) )) ) ) <= cast(:distance as float8)
+        ORDER BY ( 6371 * acos( least(1.0, greatest(-1.0, cos( radians(cast(:lat as float8)) ) * cos( radians( cast(f.latitude as float8) ) ) * cos( radians( cast(f.longitude as float8) ) - radians(cast(:lon as float8)) ) + sin( radians(cast(:lat as float8)) ) * sin( radians( cast(f.latitude as float8) ) ) )) ) ) ASC
+        """, 
+        countQuery = """
+        SELECT count(*) FROM food_posts f
+        WHERE f.status = 'AVAILABLE'
+        AND ( 6371 * acos( least(1.0, greatest(-1.0, cos( radians(cast(:lat as float8)) ) * cos( radians( cast(f.latitude as float8) ) ) * cos( radians( cast(f.longitude as float8) ) - radians(cast(:lon as float8)) ) + sin( radians(cast(:lat as float8)) ) * sin( radians( cast(f.latitude as float8) ) ) )) ) ) <= cast(:distance as float8)
+        """,
+        nativeQuery = true)
+    Page<FoodPost> findNearbyAvailablePosts(
+        @Param("lat") Double lat, 
+        @Param("lon") Double lon, 
+        @Param("distance") Double distance, 
+        Pageable pageable
     );
 
 }

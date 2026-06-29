@@ -70,15 +70,31 @@ function HomeTab({ emailVerified }) {
   const fetchPosts = async (currentPage, currentRadius) => {
     setLoading(true);
     setError(null);
-    try {
-      const data = await api.getNearbyFoodPosts(currentRadius, currentPage, 9);
-      setPosts(data.content || []);
-      setTotalPages(data.totalPages || 0);
-    } catch (err) {
-      setError(err.message);
-    } finally {
+
+    if (!navigator.geolocation) {
+      setError("Geolocation is not supported by your browser");
       setLoading(false);
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const data = await api.getNearbyFoodPosts(latitude, longitude, currentRadius, currentPage, 9);
+          setPosts(data.content || []);
+          setTotalPages(data.totalPages || 0);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+      (geoErr) => {
+        setError(`Location access required to find nearby food: ${geoErr.message}`);
+        setLoading(false);
+      }
+    );
   };
 
   const handleClaim = async (foodId) => {

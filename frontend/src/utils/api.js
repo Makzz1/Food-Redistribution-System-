@@ -52,7 +52,7 @@ export const api = {
     return data;
   },
 
-  resetPassword: async (token, newPassword, confirmPassword) => {
+    resetPassword: async (token, newPassword, confirmPassword) => {
     const res = await fetch(`${API_URL}/auth/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -60,6 +60,17 @@ export const api = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || 'Failed to reset password');
+    return data;
+  },
+
+  completeProfile: async (profileData) => {
+    const res = await fetch(`${API_URL}/auth/complete-profile`, {
+      method: 'POST',
+      headers: getAuthHeaders(), // Need auth token
+      body: JSON.stringify(profileData),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to complete profile');
     return data;
   },
 
@@ -74,8 +85,8 @@ export const api = {
     return data;
   },
 
-  getNearbyFoodPosts: async (radiusKm = 30, page = 0, size = 10) => {
-    const res = await fetch(`${API_URL}/food/available/nearby?radiusKm=${radiusKm}&page=${page}&size=${size}`, {
+  getNearbyFoodPosts: async (latitude, longitude, radiusKm = 30, page = 0, size = 10) => {
+    const res = await fetch(`${API_URL}/food/available/nearby?latitude=${latitude}&longitude=${longitude}&radiusKm=${radiusKm}&page=${page}&size=${size}`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });

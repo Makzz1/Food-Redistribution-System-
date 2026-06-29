@@ -1,69 +1,41 @@
-version: '3.8'
-
 services:
-  # 1. The Database Service
-  database:
-    build:
-      context: ./database
-    environment:
-      - MYSQL_DATABASE=foodredistribution
-      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
-    ports:
-      - "3309:3306"
-    volumes:
-      - db_data:/var/lib/mysql
-    networks:
-      - food_network
-    healthcheck:
-      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
-      interval: 5s
-      timeout: 10s
-      retries: 10
-
-  # 2. Elasticsearch Service
-  elasticsearch:
-    image: elasticsearch:8.11.1
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-    networks:
-      - food_network
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 120
-
-  # 3. The Backend Service
+  # 1. The Backend Service
   backend:
     build:
       context: ./foodredistribution
     ports:
       - "8080:8080"
     environment:
-      # Notice how we use the name of the database service ("database") as the host!
-      - SPRING_DATASOURCE_URL=jdbc:mysql://database:3306/foodredistribution
-      - DB_PASSWORD=${DB_PASSWORD}
+      - SUPABASE_DB_PASSWORD=${SUPABASE_DB_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - MAIL_PASSWORD=${MAIL_PASSWORD}
-      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Dynamic URLs — change in .env for production
+      - BACKEND_URL=${BACKEND_URL:-http://localhost:8080}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost}
+      - DDL_AUTO=${DDL_AUTO:-update}
+      - SHOW_SQL=${SHOW_SQL:-false}
+      - STORAGE_TYPE=${STORAGE_TYPE}
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
     volumes:
-      # This maps your local Windows 'uploads' folder directly into the container!
+      # Persist uploaded files across container restarts
       - ./foodredistribution/uploads:/app/uploads
-    depends_on:
-      database:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
     networks:
       - food_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    depends_on:
+      - redis
 
-  # 4. The Frontend Service
+  # 2. The Frontend Service
   frontend:
     build:
       context: ./frontend
@@ -74,12 +46,18 @@ services:
       - backend
     networks:
       - food_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
-# This creates a persistent volume on your host machine to save database data permanently
-volumes:
-  db_data:
-  es_data:
+  # 3. Redis Cache Service
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - food_network
 
-# This creates a private Wi-Fi network for the containers to talk to each other
+# This creates a private network for the containers to talk to each other
 networks:
   food_network:

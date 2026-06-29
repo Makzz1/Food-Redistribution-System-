@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.foodredistribution.foodredistribution.dto.CompleteProfileRequestDTO;
 import com.foodredistribution.foodredistribution.dto.ForgotPasswordRequestDTO;
 import com.foodredistribution.foodredistribution.dto.LoginRequestDTO;
 import com.foodredistribution.foodredistribution.dto.LoginResponseDTO;
@@ -24,9 +25,13 @@ import com.foodredistribution.foodredistribution.service.EmailService;
 import jakarta.validation.Valid;
 
 
+import com.foodredistribution.foodredistribution.annotation.RateLimit;
+
 @RestController
 @RequestMapping("/api/v1/auth")
+@RateLimit(requests = 5, window = 60, key = "auth")
 public class AuthController {
+
 
     @Autowired
     private AuthService authService;
@@ -80,6 +85,20 @@ public class AuthController {
             @Valid @RequestBody RefreshTokenRequestDTO dto
     ) {
         LoginResponseDTO response = authService.refreshAccessToken(dto);
+        return ResponseEntity.ok(response);
+    }
+
+    // ── Complete Profile (For Google OAuth2 users) ─────────────────────────
+    @PostMapping("/complete-profile")
+    public ResponseEntity<LoginResponseDTO> completeProfile(
+            @Valid @RequestBody CompleteProfileRequestDTO dto,
+            org.springframework.security.core.Authentication authentication
+    ) {
+        if (authentication == null || authentication.getName() == null) {
+            throw new RuntimeException("Unauthorized: Missing JWT token");
+        }
+        String email = authentication.getName();
+        LoginResponseDTO response = authService.completeProfile(email, dto);
         return ResponseEntity.ok(response);
     }
 

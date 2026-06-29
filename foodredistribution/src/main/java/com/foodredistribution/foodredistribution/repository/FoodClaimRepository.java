@@ -33,5 +33,8 @@ public interface FoodClaimRepository extends JpaRepository<FoodClaim, Long> {
     // For timeout scheduler: DONOR_CONFIRMED claims where donorConfirmedAt is older than cutoff
     List<FoodClaim> findByStatusAndDonorConfirmedTrueAndDonorConfirmedAtBefore(
             ClaimStatus status, LocalDateTime cutoff);
+
+    // Count queries for admin overview (avoids loading all claims into memory)
+    long countByStatus(ClaimStatus status);
 }
 

@@ -26,7 +26,7 @@ public class User{
     private boolean phoneVerified;
     private Double latitude;
     private Double longitude;
-    private String Location;
+    private String location;
     private boolean emailVerified;
     private String verificationToken;
     private Double rating = 5.0;
@@ -65,7 +65,7 @@ public class User{
         this.phoneVerified = false;
         this.emailVerified = false;
         this.verificationToken = null;
-        this.Location = location;
+        this.location = location;
         this.rating = 5.0;
     }
 
@@ -138,11 +138,11 @@ public class User{
     }
 
     public String getLocation() {
-        return Location;
+        return location;
     }
     
     public void setLocation(String location) {
-        Location = location;
+        this.location = location;
     }
 
     public boolean getEmailVerified() {

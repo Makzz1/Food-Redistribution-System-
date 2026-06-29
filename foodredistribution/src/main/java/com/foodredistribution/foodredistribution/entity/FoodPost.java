@@ -15,9 +15,14 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Index;
 
 @Entity
-@Table(name = "food_posts")
+@Table(name = "food_posts" , indexes = {
+    @Index(name = "idx_foodpost_status", columnList = "status"),
+    @Index(name = "idx_foodpost_donor", columnList = "donor_id")
+})
+
 public class FoodPost {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

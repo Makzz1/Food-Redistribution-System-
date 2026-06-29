@@ -6,6 +6,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import java.time.Duration;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.foodredistribution.foodredistribution.dto.ChangePasswordRequestDTO;
 import com.foodredistribution.foodredistribution.dto.ProfileImageResponseDTO;
@@ -15,9 +18,6 @@ import com.foodredistribution.foodredistribution.entity.ProfileImage;
 import com.foodredistribution.foodredistribution.entity.User;
 import com.foodredistribution.foodredistribution.repository.ProfileImageRepository;
 import com.foodredistribution.foodredistribution.repository.UserRepository;
-import com.foodredistribution.foodredistribution.repository.UserSearchRepository;
-import com.foodredistribution.foodredistribution.document.UserDocument;
-import org.springframework.data.elasticsearch.core.geo.GeoPoint;
 
 @Service
 public class UserService {
@@ -26,30 +26,52 @@ public class UserService {
     private final ProfileImageRepository profileImageRepository;
     private final BCryptPasswordEncoder passwordEncoder;
     private final StorageService storageService;
-    private final UserSearchRepository userSearchRepository;
 
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
     public UserService(
             UserRepository userRepository,
             ProfileImageRepository profileImageRepository,
             BCryptPasswordEncoder passwordEncoder,
             StorageService storageService,
-            UserSearchRepository userSearchRepository
+            StringRedisTemplate redisTemplate
     ) {
         this.userRepository = userRepository;
         this.profileImageRepository = profileImageRepository;
         this.passwordEncoder = passwordEncoder;
         this.storageService = storageService;
-        this.userSearchRepository = userSearchRepository;
+        this.redisTemplate = redisTemplate;
     }
 
     // ── Task 1: Rating is part of profile (read-only) ──────────────────────
 
     public ProfileResponseDTO getUserProfile(String userEmail) {
+        String cacheKey = "userProfile::" + userEmail;
+
+        try {
+            String cachedData = redisTemplate.opsForValue().get(cacheKey);
+            if (cachedData != null) {
+                return objectMapper.readValue(cachedData, ProfileResponseDTO.class);
+            }
+        } catch (Exception e) {
+            // Ignore cache read errors and fallback to DB
+        }
 
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        return toProfileResponseDTO(user);
+        ProfileResponseDTO response = toProfileResponseDTO(user);
+
+        try {
+            String json = objectMapper.writeValueAsString(response);
+            long baseTtl = 24 * 60 * 60; // 24 hours
+            long jitter = (long) (Math.random() * 3600); // 0 to 60 mins
+            redisTemplate.opsForValue().set(cacheKey, json, Duration.ofSeconds(baseTtl + jitter));
+        } catch (Exception e) {
+            // Ignore cache write errors
+        }
+
+        return response;
     }
 
     // ── Task 4: Update profile ──────────────────────────────────────────────
@@ -70,16 +92,10 @@ public class UserService {
 
         User saved = userRepository.save(user);
 
-        // Sync to Elasticsearch if location is present
-        if (saved.getLatitude() != null && saved.getLongitude() != null) {
-            UserDocument userDoc = userSearchRepository.findById(String.valueOf(saved.getId()))
-                    .orElse(new UserDocument());
-            
-            userDoc.setId(String.valueOf(saved.getId()));
-            userDoc.setEmail(saved.getEmail());
-            userDoc.setRole(saved.getRole().name());
-            userDoc.setLocation(new GeoPoint(saved.getLatitude(), saved.getLongitude()));
-            userSearchRepository.save(userDoc);
+        try {
+            redisTemplate.delete("userProfile::" + userEmail);
+        } catch (Exception e) {
+            // Ignore cache delete error
         }
 
         return toProfileResponseDTO(saved);

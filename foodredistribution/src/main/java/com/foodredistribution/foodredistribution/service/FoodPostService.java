@@ -11,6 +11,14 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import com.foodredistribution.foodredistribution.dto.ClaimFoodRequestDTO;
 import com.foodredistribution.foodredistribution.dto.ClaimFoodResponseDTO;
@@ -36,11 +44,6 @@ import com.foodredistribution.foodredistribution.repository.FoodClaimRepository;
 import com.foodredistribution.foodredistribution.repository.FoodPostImageRepository;
 import com.foodredistribution.foodredistribution.repository.FoodPostRepository;
 import com.foodredistribution.foodredistribution.repository.UserRepository;
-import com.foodredistribution.foodredistribution.repository.FoodPostSearchRepository;
-import com.foodredistribution.foodredistribution.repository.UserSearchRepository;
-import com.foodredistribution.foodredistribution.document.FoodPostDocument;
-import com.foodredistribution.foodredistribution.document.UserDocument;
-import org.springframework.data.elasticsearch.core.geo.GeoPoint;
 import com.foodredistribution.foodredistribution.utils.GeoUtils;
 
 @Service
@@ -52,8 +55,9 @@ public class FoodPostService {
     private final EmailService emailService;
     private final FoodPostImageRepository foodPostImageRepository;
     private final StorageService storageService;
-    private final FoodPostSearchRepository foodPostSearchRepository;
-    private final UserSearchRepository userSearchRepository;
+
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     public FoodPostService(
             FoodPostRepository foodPostRepository,
@@ -62,8 +66,7 @@ public class FoodPostService {
             EmailService emailService,
             FoodPostImageRepository foodPostImageRepository,
             StorageService storageService,
-            FoodPostSearchRepository foodPostSearchRepository,
-            UserSearchRepository userSearchRepository
+            StringRedisTemplate redisTemplate
     ) {
         this.foodPostRepository = foodPostRepository;
         this.userRepository = userRepository;
@@ -71,8 +74,47 @@ public class FoodPostService {
         this.emailService = emailService;
         this.foodPostImageRepository = foodPostImageRepository;
         this.storageService = storageService;
-        this.foodPostSearchRepository = foodPostSearchRepository;
-        this.userSearchRepository = userSearchRepository;
+        this.redisTemplate = redisTemplate;
+    }
+
+    private void clearFeedAndNearbyCaches(Long foodPostId) {
+        try {
+            // Use SCAN instead of KEYS to avoid blocking the Redis instance
+            scanAndDelete("availablePosts::*");
+            scanAndDelete("nearbyPosts::*");
+            if (foodPostId != null) {
+                redisTemplate.delete("foodPostDetails::" + foodPostId);
+            }
+        } catch (Exception e) {
+            // Ignore cache delete errors — cache will expire naturally
+        }
+    }
+
+    /**
+     * Non-blocking SCAN + DELETE: iterates keys with a cursor instead of
+     * blocking the entire Redis instance like KEYS does.
+     */
+    private void scanAndDelete(String pattern) {
+        try {
+            Set<String> keysToDelete = redisTemplate.execute(
+                (org.springframework.data.redis.core.RedisCallback<Set<String>>) connection -> {
+                    Set<String> keys = new java.util.HashSet<>();
+                    var scanOptions = org.springframework.data.redis.core.ScanOptions
+                            .scanOptions().match(pattern).count(100).build();
+                    try (var cursor = connection.keyCommands().scan(scanOptions)) {
+                        while (cursor.hasNext()) {
+                            keys.add(new String(cursor.next()));
+                        }
+                    }
+                    return keys;
+                }
+            );
+            if (keysToDelete != null && !keysToDelete.isEmpty()) {
+                redisTemplate.delete(keysToDelete);
+            }
+        } catch (Exception e) {
+            // Ignore scan errors
+        }
     }
 
     public FoodPostResponseDTO createFoodPost(
@@ -109,28 +151,16 @@ public class FoodPostService {
         foodPost.setLongitude(request.getLongitude());
         foodPost = foodPostRepository.save(foodPost);
 
-        // Sync to Elasticsearch
-        FoodPostDocument esDoc = new FoodPostDocument(
-                String.valueOf(foodPost.getId()),
-                foodPost.getFoodName(),
-                foodPost.getDescription(),
-                foodPost.getStatus().name(),
-                new GeoPoint(foodPost.getLatitude(), foodPost.getLongitude())
-        );
-        foodPostSearchRepository.save(esDoc);
-
-        // O(log n) Spatial query for nearby receivers using Elasticsearch
-        List<UserDocument> nearbyReceivers = userSearchRepository.findByRoleAndLocationNear(
+        // Native SQL Spatial query for nearby receivers using PostgreSQL Haversine
+        List<User> nearbyReceivers = userRepository.findNearbyUsersByRole(
                 UserRoleEnum.RECEIVER.name(),
-                new GeoPoint(foodPost.getLatitude(), foodPost.getLongitude()),
-                "50km"
+                foodPost.getLatitude(), 
+                foodPost.getLongitude(),
+                50.0 // 50km radius
         );
 
-        for (UserDocument receiverDoc : nearbyReceivers) {
-            // Verify if email is verified by fetching from MySQL, since ES doesn't have it (or we could add it to ES)
-            User receiver = userRepository.findByEmail(receiverDoc.getEmail()).orElse(null);
-            
-            if (receiver != null && receiver.getEmailVerified()) {
+        for (User receiver : nearbyReceivers) {
+            if (receiver.getEmailVerified()) {
                 emailService.sendFoodNotificationEmail(
                         receiver.getEmail(),
                         foodPost.getFoodName(),
@@ -140,7 +170,7 @@ public class FoodPostService {
             }
         }
         
-        return new FoodPostResponseDTO(
+        FoodPostResponseDTO response = new FoodPostResponseDTO(
                 foodPost.getId(),
                 foodPost.getFoodName(),
                 foodPost.getDescription(),
@@ -151,6 +181,8 @@ public class FoodPostService {
                 foodPost.getExpiryTime(),
                 foodPost.getDonor().getName()
         );
+        clearFeedAndNearbyCaches(null);
+        return response;
     }
 
     public Page<FoodPostResponseDTO>
@@ -158,6 +190,19 @@ public class FoodPostService {
             int page,
             int size
     ) {
+
+        String cacheKey = "availablePosts::" + page + "-" + size;
+        try {
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                Map<String, Object> map = objectMapper.readValue(cached, new TypeReference<Map<String, Object>>(){});
+                List<FoodPostResponseDTO> content = objectMapper.convertValue(map.get("content"), new TypeReference<List<FoodPostResponseDTO>>(){});
+                long totalElements = ((Number) map.get("totalElements")).longValue();
+                int pageNumber = (int) map.get("pageNumber");
+                int pageSize = (int) map.get("pageSize");
+                return new PageImpl<>(content, PageRequest.of(pageNumber, pageSize), totalElements);
+            }
+        } catch (Exception e) {}
 
         Pageable pageable =
                 PageRequest.of(page, size);
@@ -168,7 +213,7 @@ public class FoodPostService {
                         pageable
                 );
 
-        return foodPosts.map(foodPost ->
+        Page<FoodPostResponseDTO> result = foodPosts.map(foodPost ->
                 new FoodPostResponseDTO(
                         foodPost.getId(),
                         foodPost.getFoodName(),
@@ -181,6 +226,20 @@ public class FoodPostService {
                         foodPost.getDonor().getName()
                 )
         );
+
+        try {
+            Map<String, Object> map = new HashMap<>();
+            map.put("content", result.getContent());
+            map.put("totalElements", result.getTotalElements());
+            map.put("pageNumber", result.getNumber());
+            map.put("pageSize", result.getSize());
+            String json = objectMapper.writeValueAsString(map);
+            long baseTtl = 10 * 60; // 10 mins
+            long jitter = (long) (Math.random() * 120); // 0-2 mins
+            redisTemplate.opsForValue().set(cacheKey, json, Duration.ofSeconds(baseTtl + jitter));
+        } catch (Exception e) {}
+
+        return result;
     }
 
     @Transactional
@@ -246,19 +305,13 @@ public class FoodPostService {
 
     foodPostRepository.save(foodPost);
 
-    // Sync status change to Elasticsearch
-    foodPostSearchRepository.findById(String.valueOf(foodPost.getId())).ifPresent(doc -> {
-        doc.setStatus(foodPost.getStatus().name());
-        doc.setQuantity(foodPost.getQuantity()); // Assuming you add quantity later if needed, but status is key
-        foodPostSearchRepository.save(doc);
-    });
-
     FoodClaim foodClaim = new FoodClaim(
             requestedQuantity,
             receiver,
             foodPost
     );
     foodClaimRepository.save(foodClaim);
+    clearFeedAndNearbyCaches(foodPostId);
     }
 
     public List<ClaimFoodResponseDTO>
@@ -338,6 +391,14 @@ public class FoodPostService {
         }
 
         public FoodPostResponseDTO getFoodPostById(Long foodPostId) {
+                String cacheKey = "foodPostDetails::" + foodPostId;
+                try {
+                    String cached = redisTemplate.opsForValue().get(cacheKey);
+                    if (cached != null) {
+                        return objectMapper.readValue(cached, FoodPostResponseDTO.class);
+                    }
+                } catch (Exception e) {}
+
                 FoodPost foodPost = foodPostRepository.findById(foodPostId)
                         .orElseThrow(() -> new FoodNotFoundException("Food post not found"));
 
@@ -345,7 +406,7 @@ public class FoodPostService {
                         throw new FoodNotFoundException("Food post not found");
                 }
 
-                return new FoodPostResponseDTO(
+                FoodPostResponseDTO response = new FoodPostResponseDTO(
                         foodPost.getId(),
                         foodPost.getFoodName(),
                         foodPost.getDescription(),
@@ -357,8 +418,16 @@ public class FoodPostService {
                         foodPost.getDonor().getName()
                 );
         
-        
+                try {
+                    String json = objectMapper.writeValueAsString(response);
+                    long baseTtl = 10 * 60; // 10 mins
+                    long jitter = (long) (Math.random() * 120);
+                    redisTemplate.opsForValue().set(cacheKey, json, Duration.ofSeconds(baseTtl + jitter));
+                } catch (Exception e) {}
+
+                return response;
         }
+
 
         @Transactional
         public FoodPostResponseDTO updateFoodPost(
@@ -434,15 +503,7 @@ public class FoodPostService {
         FoodPost updatedFoodPost =
                 foodPostRepository.save(foodPost);
 
-        // Sync updates to Elasticsearch
-        foodPostSearchRepository.findById(String.valueOf(updatedFoodPost.getId())).ifPresent(doc -> {
-            doc.setFoodName(updatedFoodPost.getFoodName());
-            doc.setDescription(updatedFoodPost.getDescription());
-            doc.setLocation(new GeoPoint(updatedFoodPost.getLatitude(), updatedFoodPost.getLongitude()));
-            foodPostSearchRepository.save(doc);
-        });
-
-        return new FoodPostResponseDTO(
+        FoodPostResponseDTO response = new FoodPostResponseDTO(
                 updatedFoodPost.getId(),
                 updatedFoodPost.getFoodName(),
                 updatedFoodPost.getDescription(),
@@ -453,6 +514,8 @@ public class FoodPostService {
                 updatedFoodPost.getExpiryTime(),
                 updatedFoodPost.getDonor().getName()
         );
+        clearFeedAndNearbyCaches(foodPostId);
+        return response;
         }
 
         @Transactional
@@ -484,9 +547,7 @@ public class FoodPostService {
 
         foodPost.setStatus(FoodStatus.DELETED);
         foodPostRepository.save(foodPost);
-
-        // Remove from Elasticsearch
-        foodPostSearchRepository.deleteById(String.valueOf(foodPostId));
+        clearFeedAndNearbyCaches(foodPostId);
         }
 
     // ── Task 3: Food post image upload ──────────────────────────────────────
@@ -536,61 +597,74 @@ public class FoodPostService {
     }
 
     // ── Task 8: Nearby food search ───────────────────────────────────────────
-
-    public List<NearbyFoodPostResponseDTO> getNearbyFoodPosts(
-            String userEmail,
+    public Page<NearbyFoodPostResponseDTO> getNearbyFoodPosts(
+            double latitude,
+            double longitude,
             double radiusKm,
             int page,
             int size
     ) {
-        User receiver = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
-
-        if (receiver.getLatitude() == null || receiver.getLongitude() == null) {
-            throw new RuntimeException(
-                    "Your location is not set. Please update your profile with coordinates."
-            );
+        double latRounded = Math.round(latitude * 100.0) / 100.0;
+        double lonRounded = Math.round(longitude * 100.0) / 100.0;
+        String cacheKey = "nearbyPosts::" + latRounded + "-" + lonRounded + "-" + radiusKm + "-" + page + "-" + size;
+        
+        try {
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                Map<String, Object> map = objectMapper.readValue(cached, new TypeReference<Map<String, Object>>(){});
+                List<NearbyFoodPostResponseDTO> content = objectMapper.convertValue(map.get("content"), new TypeReference<List<NearbyFoodPostResponseDTO>>(){});
+                long totalElements = ((Number) map.get("totalElements")).longValue();
+                int pageNumber = (int) map.get("pageNumber");
+                int pageSize = (int) map.get("pageSize");
+                return new PageImpl<>(content, PageRequest.of(pageNumber, pageSize), totalElements);
+            }
+        } catch (Exception e) {
+            System.err.println("Error reading nearby posts from cache:");
+            e.printStackTrace();
         }
 
-        // O(log n) spatial query via Elasticsearch BKD Trees
-        Page<FoodPostDocument> esResults = foodPostSearchRepository.findByLocationNear(
-                new GeoPoint(receiver.getLatitude(), receiver.getLongitude()),
-                radiusKm + "km",
+        // Native PostgreSQL geospatial query
+        Page<FoodPost> dbResults = foodPostRepository.findNearbyAvailablePosts(
+                latitude, 
+                longitude,
+                radiusKm,
                 PageRequest.of(page, size)
         );
 
-        double receiverLat = receiver.getLatitude();
-        double receiverLon = receiver.getLongitude();
+        Page<NearbyFoodPostResponseDTO> result = dbResults.map(fp -> {
+            double distanceKm = GeoUtils.calculateDistanceKm(
+                    latitude, longitude,
+                    fp.getLatitude(), fp.getLongitude()
+                );
+            return new NearbyFoodPostResponseDTO(
+                    fp.getId(),
+                    fp.getFoodName(),
+                    fp.getDescription(),
+                    fp.getQuantity(),
+                    fp.getPickupAddress(),
+                    fp.getLatitude(),
+                    fp.getLongitude(),
+                    fp.getExpiryTime(),
+                    fp.getDonor().getName(),
+                    Math.round(distanceKm * 10.0) / 10.0
+            );
+        });
 
-        List<NearbyFoodPostResponseDTO> nearby = esResults.stream()
-                .filter(doc -> doc.getStatus().equals(FoodStatus.AVAILABLE.name())) // Extra safety
-                .map(doc -> {
-                    // Fetch full entity from MySQL (or you could store more fields in ES)
-                    FoodPost fp = foodPostRepository.findById(Long.valueOf(doc.getId())).orElse(null);
-                    if (fp == null) return null;
+        try {
+            Map<String, Object> map = new HashMap<>();
+            map.put("content", result.getContent());
+            map.put("totalElements", result.getTotalElements());
+            map.put("pageNumber", result.getNumber());
+            map.put("pageSize", result.getSize());
+            String json = objectMapper.writeValueAsString(map);
+            long baseTtl = 5 * 60; // 5 mins
+            long jitter = (long) (Math.random() * 60); // 0-1 min
+            redisTemplate.opsForValue().set(cacheKey, json, Duration.ofSeconds(baseTtl + jitter));
+        } catch (Exception e) {
+            System.err.println("Error saving nearby posts to cache:");
+            e.printStackTrace();
+        }
 
-                    double distanceKm = GeoUtils.calculateDistanceKm(
-                            receiverLat, receiverLon,
-                            fp.getLatitude(), fp.getLongitude()
-                    );
-                    return new NearbyFoodPostResponseDTO(
-                            fp.getId(),
-                            fp.getFoodName(),
-                            fp.getDescription(),
-                            fp.getQuantity(),
-                            fp.getPickupAddress(),
-                            fp.getLatitude(),
-                            fp.getLongitude(),
-                            fp.getExpiryTime(),
-                            fp.getDonor().getName(),
-                            Math.round(distanceKm * 10.0) / 10.0
-                    );
-                })
-                .filter(dto -> dto != null)
-                .sorted(Comparator.comparingDouble(NearbyFoodPostResponseDTO::getDistanceKm))
-                .collect(Collectors.toList());
-
-        return nearby;
+        return result;
     }
-
 }
