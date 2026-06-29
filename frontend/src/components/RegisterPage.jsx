@@ -150,7 +150,7 @@ export default function RegisterPage() {
             type="button" 
             className="btn-primary" 
             style={{ backgroundColor: '#ffffff', color: '#757575', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 600, border: '1px solid #ddd' }}
-            onClick={() => window.location.href = 'http://localhost:8080/oauth2/authorization/google'}
+            onClick={() => window.location.href = `${import.meta.env.VITE_API_BASE_URL || ''}/oauth2/authorization/google`}
           >
             <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
               <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.7 17.74 9.5 24 9.5z"/>
