@@ -24,9 +24,9 @@ jobs:
           echo "AWS_SECRET_KEY=${{ secrets.AWS_SECRET_KEY }}" >> .env
           echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
           echo "AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" >> .env
-          echo "BACKEND_URL=http://${{ secrets.EC2_HOST }}:8080" >> .env
-          echo "FRONTEND_URL=http://${{ secrets.EC2_HOST }}" >> .env
-          echo "CORS_ORIGINS=http://${{ secrets.EC2_HOST }},http://localhost:3000,http://localhost:5173" >> .env
+          echo "BACKEND_URL=https://naahuh.makzz.dev" >> .env
+          echo "FRONTEND_URL=https://naahuh.makzz.dev" >> .env
+          echo "CORS_ORIGINS=https://naahuh.makzz.dev,http://localhost:3000,http://localhost:5173" >> .env
           echo "DDL_AUTO=update" >> .env
           echo "SHOW_SQL=false" >> .env
           
